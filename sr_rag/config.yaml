@@ -1,0 +1,38 @@
+llm:
+  provider: groq
+  model: llama-3.3-70b-versatile
+  fallback_model: gpt-4o-mini
+  temperature: 0.1
+  max_tokens: 2048
+
+retrieval:
+  k: 5
+  abstention_threshold: 0.40   # max FAISS sim below this → abstain
+
+screening:
+  llm_confidence_threshold: 0.85
+  faiss_similarity_threshold: 0.65
+  spot_check_rate: 0.10
+
+refuter:
+  concurrency_cap: 3            # asyncio.Semaphore value
+  max_retries: 2
+  retry_backoff_seconds: [1, 2]
+  leakage_warning_threshold: 0.10
+
+validation:
+  min_claim_words: 8
+  dedup_similarity_threshold: 0.92
+
+evaluation:
+  seed: 42
+  subset_size: 200
+  datasets: ["faitheval", "truthfulqa", "hotpotqa"]
+
+logging:
+  run_log_path: logs/run_log.jsonl
+  eval_log_path: logs/eval_log.jsonl
+
+prompts:
+  version: v1
+  base_path: prompts/

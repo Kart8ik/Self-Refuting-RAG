@@ -1,0 +1,1 @@
+Classify the user's query. Output ONLY one word: SKIP, LITE, or FULL. SKIP = simple/factual/conversational/creative. LITE = single-hop factual lookup. FULL = multi-hop, contested, medical/legal/scientific, requires sources. No explanation.
