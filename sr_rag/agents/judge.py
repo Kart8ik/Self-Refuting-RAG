@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import re
 from typing import List
 from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -69,6 +70,31 @@ class JudgeAgent:
                 justification = "Heuristic fallback: no sufficiently strong supporting evidence was found."
 
         return verdict, float(confidence), justification
+
+    def _calibrate_verdict(self, claim: Claim, score_bundle: EvidenceScoreBundle, refuter_result: RefuterResult, llm_verdict: str, llm_conf: float):
+        """Apply deterministic guardrails so weak/contested evidence is not over-labeled as SUPPORTED."""
+        verdict = (llm_verdict or "UNVERIFIABLE").upper()
+        refuter_verdict = refuter_result.verdict if refuter_result else "NOT_FOUND"
+        prog = float(score_bundle.programmatic_confidence)
+        relevance = float(score_bundle.relevance_score)
+        has_support = bool(claim.supporting_doc_ids)
+
+        # If refuter found contesting evidence, SUPPORTED is not allowed.
+        if refuter_verdict == "CONTESTED" and verdict == "SUPPORTED":
+            if prog < 0.40 or relevance < 0.45:
+                return "REFUTED", min(llm_conf, 0.55), "Calibrated: refuter reported contested evidence and support score is weak."
+            return "CONFLICTING", min(llm_conf, 0.70), "Calibrated: refuter reported contested evidence, so claim cannot remain fully supported."
+
+        # If evidence was deemed insufficient and support is weak, downgrade from SUPPORTED.
+        if refuter_verdict == "INSUFFICIENT" and verdict == "SUPPORTED" and (not has_support or prog < 0.55):
+            return "UNVERIFIABLE", min(llm_conf, 0.45), "Calibrated: refuter found evidence insufficient and programmatic support was weak."
+
+        # Strong/absolute robustness claims need stronger retrieval support.
+        strong_claim = bool(re.search(r"\b(always|never|robust|robustly|large\s+drop-?off|guarantee|cannot|can't)\b", claim.claim_text, flags=re.IGNORECASE))
+        if verdict == "SUPPORTED" and strong_claim and relevance < 0.65:
+            return "UNVERIFIABLE", min(llm_conf, 0.50), "Calibrated: strong/absolute claim was not backed by sufficiently strong evidence similarity."
+
+        return verdict, llm_conf, ""
             
     def judge_claim(self, claim: Claim, score_bundle: EvidenceScoreBundle, proposer_evidence: List[RetrievedPassage], refuter_result: RefuterResult = None) -> JudgeVerdict:
         prop_text = "\n".join([f"[{p.doc_id}] {p.text}" for p in proposer_evidence])
@@ -159,13 +185,28 @@ class JudgeAgent:
             )
             
         llm_conf = float(result_json.get("confidence", 0.0))
-        final_conf = (llm_conf + score_bundle.programmatic_confidence) / 2.0
+        llm_verdict = result_json.get("verdict", "UNVERIFIABLE")
+        calibrated_verdict, calibrated_llm_conf, calibration_reason = self._calibrate_verdict(
+            claim,
+            score_bundle,
+            refuter_result,
+            llm_verdict,
+            llm_conf,
+        )
+        final_conf = (calibrated_llm_conf + score_bundle.programmatic_confidence) / 2.0
+
+        justification = result_json.get("justification", "")
+        if calibration_reason:
+            if justification:
+                justification = f"{justification} {calibration_reason}"
+            else:
+                justification = calibration_reason
         
         return JudgeVerdict(
             claim_id=claim.claim_id,
-            verdict=result_json.get("verdict", "UNVERIFIABLE"),
+            verdict=calibrated_verdict,
             final_confidence=final_conf,
-            justification=result_json.get("justification", ""),
+            justification=justification,
             supporting_evidence=claim_supporting_evidence,
             counter_evidence=refuter_result.counter_passages if refuter_result else []
         )

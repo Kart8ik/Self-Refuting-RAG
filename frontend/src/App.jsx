@@ -39,6 +39,11 @@ export default function App() {
   const [selectedMessageId, setSelectedMessageId] = useState(1);
   const [logs, setLogs] = useState([]);
   const [logLoading, setLogLoading] = useState(false);
+  const [keys, setKeys] = useState([]);
+  const [activeKeyName, setActiveKeyName] = useState('');
+  const [keyLoading, setKeyLoading] = useState(false);
+  const [persistKeySelection, setPersistKeySelection] = useState(true);
+  const [keyError, setKeyError] = useState('');
 
   const createMessage = (message) => {
     const id = nextMessageId.current;
@@ -64,7 +69,77 @@ export default function App() {
   useEffect(() => {
     refreshCorpus();
     refreshLogs();
+    refreshKeys();
   }, []);
+
+  function formatRelativeTime(isoTime) {
+    if (!isoTime) return 'never';
+    const dt = new Date(isoTime);
+    if (Number.isNaN(dt.getTime())) return 'unknown';
+    const deltaSec = Math.max(0, Math.floor((Date.now() - dt.getTime()) / 1000));
+    if (deltaSec < 5) return 'just now';
+    if (deltaSec < 60) return `${deltaSec}s ago`;
+    const mins = Math.floor(deltaSec / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  }
+
+  async function refreshKeys() {
+    try {
+      const response = await apiFetch('/api/keys');
+      if (!response.ok) {
+        throw new Error('Failed to load key list');
+      }
+      const data = await response.json();
+      const keyList = Array.isArray(data.keys) ? data.keys : [];
+      setKeys(keyList);
+      const active = data.active_key_name || keyList.find((k) => k.active)?.name || '';
+      setActiveKeyName(active);
+      setKeyError('');
+    } catch (error) {
+      setKeyError(error.message);
+    }
+  }
+
+  async function handleKeyChange(event) {
+    const next = event.target.value;
+    if (!next || keyLoading || next === activeKeyName) return;
+
+    setKeyLoading(true);
+    try {
+      const response = await apiFetch('/api/keys/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: next, persist: persistKeySelection }),
+      });
+
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(err || 'Failed to switch key');
+      }
+
+      await refreshKeys();
+      const infoMessage = createMessage({
+        role: 'assistant',
+        text: `Switched active Groq key to ${next}${persistKeySelection ? ' and saved to .env.' : '.'}`,
+      });
+      setMessages((prev) => [...prev, infoMessage]);
+      setSelectedMessageId(infoMessage.id);
+    } catch (error) {
+      setKeyError(error.message);
+      const errorMessage = createMessage({
+        role: 'assistant',
+        text: `Key switch failed: ${error.message}`,
+      });
+      setMessages((prev) => [...prev, errorMessage]);
+      setSelectedMessageId(errorMessage.id);
+    } finally {
+      setKeyLoading(false);
+    }
+  }
 
   async function refreshCorpus() {
     try {
@@ -131,6 +206,7 @@ export default function App() {
         assistantMessage,
       ]);
       setSelectedMessageId(assistantMessage.id);
+      await refreshKeys();
     } catch (error) {
       const assistantErrorMessage = createMessage({
         role: 'assistant',
@@ -228,6 +304,31 @@ export default function App() {
             {uploading ? 'Uploading...' : 'Upload document'}
           </label>
         </div>
+        <div className="key-strip">
+          <div className="key-select-wrap">
+            <span>Groq key</span>
+            <select value={activeKeyName} onChange={handleKeyChange} disabled={keyLoading || !keys.length}>
+              {!keys.length ? <option value="">No keys found</option> : null}
+              {keys.map((item) => {
+                const recency = item.last_used_at ? `recently used ${formatRelativeTime(item.last_used_at)}` : 'never used';
+                return (
+                  <option key={item.name} value={item.name}>
+                    {`${item.name} (${item.masked_value}) - ${recency}`}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <label className="persist-toggle">
+            <input
+              type="checkbox"
+              checked={persistKeySelection}
+              onChange={(e) => setPersistKeySelection(e.target.checked)}
+            />
+            Save selection to .env
+          </label>
+        </div>
+        {keyError ? <p className="error-line">{keyError}</p> : null}
         {corpusError ? <p className="error-line">{corpusError}</p> : null}
         <div className="topbar-actions">
           <button type="button" onClick={refreshLogs} disabled={logLoading}>

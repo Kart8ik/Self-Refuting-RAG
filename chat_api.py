@@ -2,10 +2,11 @@ import os
 import logging
 import http.client as http_client
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, dotenv_values, set_key
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -23,6 +24,7 @@ load_dotenv()
 
 DEBUG_LOGS = os.environ.get("SR_RAG_DEBUG_LOGS", "1").strip().lower() not in {"0", "false", "no"}
 LOG_PATH = Path(__file__).resolve().parent / "logs" / "terminal" / "backend.log"
+ENV_PATH = Path(__file__).resolve().parent / ".env"
 INDEX_LOCK = threading.RLock()
 CURRENT_CORPUS: Dict[str, Any] = {
     "name": "built-in sample corpus",
@@ -31,6 +33,17 @@ CURRENT_CORPUS: Dict[str, Any] = {
     "chunk_count": 3,
     "files": ["built-in sample"],
 }
+KEY_USAGE_LOCK = threading.RLock()
+KEY_LAST_USED: Dict[str, str] = {}
+ACTIVE_GROQ_KEY_NAME = os.environ.get("SR_RAG_ACTIVE_GROQ_KEY_NAME", "GROQ_API_KEY")
+
+
+def _is_groq_key_name(name: str) -> bool:
+    if name == "GROQ_API_KEY":
+        return True
+    if name.startswith("GROQ_API_KEY_"):
+        return True
+    return name.startswith("GROQ_") and "KEY" in name
 
 
 def _configure_logging() -> None:
@@ -92,6 +105,29 @@ class ChatResponse(BaseModel):
     overall_confidence: float
     claim_table: Optional[List[Dict[str, Any]]]
     metadata: Dict[str, Any]
+    key_info: Optional[Dict[str, Any]] = None
+
+
+class KeyOption(BaseModel):
+    name: str
+    masked_value: str
+    active: bool
+    last_used_at: Optional[str] = None
+
+
+class KeyListResponse(BaseModel):
+    active_key_name: Optional[str]
+    keys: List[KeyOption]
+
+
+class KeySelectRequest(BaseModel):
+    name: str
+    persist: bool = True
+
+
+class KeySelectResponse(BaseModel):
+    status: str
+    active_key_name: str
 
 
 class CorpusUploadRequest(BaseModel):
@@ -111,6 +147,109 @@ class CorpusResponse(BaseModel):
 class LogResponse(BaseModel):
     path: str
     lines: List[str]
+
+
+def _mask_secret(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _collect_groq_keys() -> Dict[str, str]:
+    keys: Dict[str, str] = {}
+    env_map = dict(os.environ)
+
+    for key, value in env_map.items():
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if _is_groq_key_name(key):
+            keys[key] = value.strip()
+
+    # Parse .env directly so repeated GROQ_API_KEY lines are all visible/selectable.
+    if ENV_PATH.exists():
+        try:
+            with ENV_PATH.open("r", encoding="utf-8", errors="replace") as fh:
+                raw_lines = fh.readlines()
+        except Exception:
+            raw_lines = []
+
+        duplicate_index = 0
+        for raw in raw_lines:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if not _is_groq_key_name(key):
+                continue
+
+            value = value.strip().strip('"').strip("'")
+            if not value:
+                continue
+
+            if key == "GROQ_API_KEY":
+                duplicate_index += 1
+                alias = f"GROQ_API_KEY_ENV_{duplicate_index}"
+                keys[alias] = value
+            elif key not in keys:
+                keys[key] = value
+
+    try:
+        file_map = dotenv_values(str(ENV_PATH)) if ENV_PATH.exists() else {}
+        for k, v in file_map.items():
+            if isinstance(v, str) and v.strip() and _is_groq_key_name(k) and k not in keys:
+                keys[k] = v.strip()
+    except Exception:
+        pass
+
+    return dict(sorted(keys.items()))
+
+
+def _set_active_groq_key(name: str, persist: bool = True) -> None:
+    global ACTIVE_GROQ_KEY_NAME
+    keys = _collect_groq_keys()
+    if name not in keys:
+        raise ValueError(f"Unknown Groq key name: {name}")
+
+    selected_value = keys[name]
+    os.environ["GROQ_API_KEY"] = selected_value
+    os.environ["SR_RAG_ACTIVE_GROQ_KEY_NAME"] = name
+    ACTIVE_GROQ_KEY_NAME = name
+
+    if persist:
+        try:
+            if not ENV_PATH.exists():
+                ENV_PATH.touch()
+            set_key(str(ENV_PATH), "GROQ_API_KEY", selected_value)
+            set_key(str(ENV_PATH), "SR_RAG_ACTIVE_GROQ_KEY_NAME", name)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to persist key selection to .env: {exc}")
+
+
+def _active_key_name() -> Optional[str]:
+    keys = _collect_groq_keys()
+    selected = os.environ.get("SR_RAG_ACTIVE_GROQ_KEY_NAME") or ACTIVE_GROQ_KEY_NAME
+    if selected in keys:
+        return selected
+
+    current_secret = os.environ.get("GROQ_API_KEY", "")
+    if current_secret:
+        for name, value in keys.items():
+            if value == current_secret:
+                return name
+    return None
+
+
+def _record_key_usage(name: Optional[str]) -> Optional[str]:
+    if not name:
+        return None
+    stamp = datetime.now(timezone.utc).isoformat()
+    with KEY_USAGE_LOCK:
+        KEY_LAST_USED[name] = stamp
+    return stamp
 
 
 def _fallback_corpus() -> tuple[list[str], list[dict]]:
@@ -261,10 +400,49 @@ def _build_index_from_env() -> VectorIndex:
 _CONFIG = load_config()
 _INDEX = _build_index_from_env()
 
+initial_key_name = _active_key_name()
+if initial_key_name:
+    _set_active_groq_key(initial_key_name, persist=False)
+
 
 @app.get("/api/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/keys", response_model=KeyListResponse)
+def list_keys() -> KeyListResponse:
+    keys = _collect_groq_keys()
+    active_name = _active_key_name()
+    with KEY_USAGE_LOCK:
+        usage_snapshot = dict(KEY_LAST_USED)
+
+    key_items = [
+        KeyOption(
+            name=name,
+            masked_value=_mask_secret(value),
+            active=name == active_name,
+            last_used_at=usage_snapshot.get(name),
+        )
+        for name, value in keys.items()
+    ]
+    return KeyListResponse(active_key_name=active_name, keys=key_items)
+
+
+@app.post("/api/keys/select", response_model=KeySelectResponse)
+def select_key(payload: KeySelectRequest) -> KeySelectResponse:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name cannot be empty")
+
+    try:
+        _set_active_groq_key(name, persist=payload.persist)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return KeySelectResponse(status="ok", active_key_name=name)
 
 
 @app.get("/api/corpus")
@@ -319,10 +497,16 @@ def chat(payload: ChatRequest) -> ChatResponse:
     with INDEX_LOCK:
         current_index = _INDEX
 
+    active_key = _active_key_name()
+    used_at = _record_key_usage(active_key)
     output = run_query(message, _CONFIG, current_index)
     return ChatResponse(
         answer=output.natural_language_answer,
         overall_confidence=output.overall_confidence,
         claim_table=output.claim_table,
         metadata=output.metadata,
+        key_info={
+            "active_key_name": active_key,
+            "last_used_at": used_at,
+        },
     )

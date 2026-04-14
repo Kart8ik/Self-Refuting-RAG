@@ -103,6 +103,47 @@ body {
   margin-top: 12px;
 }
 
+.key-strip {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.key-select-wrap {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.75);
+  padding: 10px 12px;
+  min-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.key-select-wrap span {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.key-select-wrap select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+.persist-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
 .layout {
   display: grid;
   grid-template-columns: 2fr 1fr;
