@@ -1,3 +1,4 @@
+import os
 import faiss
 import numpy as np
 import json
@@ -14,10 +15,23 @@ class VectorIndex:
         
         self.d = 384
         self.M = 16
-        # Use METRIC_INNER_PRODUCT for cosine similarity with L2 normalized vectors
-        self.index = faiss.IndexHNSWFlat(self.d, self.M, faiss.METRIC_INNER_PRODUCT)
-        self.index.hnsw.efConstruction = 200
-        self.index.hnsw.efSearch = 50
+
+        # Reduce native thread contention; improves stability on macOS arm64.
+        faiss_threads = int(os.environ.get("FAISS_THREADS", "1"))
+        try:
+            faiss.omp_set_num_threads(max(1, faiss_threads))
+        except Exception:
+            pass
+
+        # Default to FLAT for stability; set SR_RAG_FAISS_INDEX=hnsw to re-enable HNSW.
+        index_mode = os.environ.get("SR_RAG_FAISS_INDEX", "flat").strip().lower()
+        if index_mode == "hnsw":
+            self.index = faiss.IndexHNSWFlat(self.d, self.M, faiss.METRIC_INNER_PRODUCT)
+            self.index.hnsw.efConstruction = 200
+            self.index.hnsw.efSearch = 50
+        else:
+            self.index = faiss.IndexFlatIP(self.d)
+
         self.metadata: List[Dict] = []
         
     def build(self, documents: List[str], metadata: List[Dict]) -> None:

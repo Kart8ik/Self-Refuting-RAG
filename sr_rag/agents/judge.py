@@ -29,6 +29,46 @@ class JudgeAgent:
         
         with open(prompt_path, "r", encoding="utf-8") as f:
             self.system_prompt_template = f.read().strip()
+
+    def _heuristic_fallback_verdict(self, claim: Claim, score_bundle: EvidenceScoreBundle, refuter_result: RefuterResult = None):
+        """Deterministic fallback used when judge LLM calls fail (e.g., 429s)."""
+        prog = float(score_bundle.programmatic_confidence)
+        has_support = bool(claim.supporting_doc_ids)
+        refuter_verdict = refuter_result.verdict if refuter_result else "NOT_FOUND"
+
+        if refuter_verdict == "CONTESTED":
+            if prog < 0.40:
+                verdict = "REFUTED"
+                confidence = max(0.20, min(0.80, 0.60 * (1.0 - prog)))
+                justification = "Heuristic fallback: refuter found contesting evidence and support was weak."
+            else:
+                verdict = "CONFLICTING"
+                confidence = max(0.25, min(0.85, 0.50 + 0.30 * prog))
+                justification = "Heuristic fallback: both supporting and contesting evidence exist."
+        elif refuter_verdict == "INSUFFICIENT":
+            if has_support and prog >= 0.55:
+                verdict = "SUPPORTED"
+                confidence = max(0.30, min(0.90, 0.55 + 0.35 * prog))
+                justification = "Heuristic fallback: support exists and refuter could not find strong contradiction."
+            else:
+                verdict = "UNVERIFIABLE"
+                confidence = max(0.10, min(0.45, 0.30 * prog))
+                justification = "Heuristic fallback: evidence remained insufficient to verify the claim."
+        else:  # NOT_FOUND or no refuter result
+            if has_support and prog >= 0.45:
+                verdict = "SUPPORTED"
+                confidence = max(0.30, min(0.92, 0.50 + 0.40 * prog))
+                justification = "Heuristic fallback: supporting evidence exists and no contradiction was found."
+            elif has_support and prog >= 0.30:
+                verdict = "CONFLICTING"
+                confidence = max(0.20, min(0.70, 0.35 + 0.35 * prog))
+                justification = "Heuristic fallback: support is partial; confidence is limited."
+            else:
+                verdict = "UNVERIFIABLE"
+                confidence = max(0.10, min(0.40, 0.25 * prog))
+                justification = "Heuristic fallback: no sufficiently strong supporting evidence was found."
+
+        return verdict, float(confidence), justification
             
     def judge_claim(self, claim: Claim, score_bundle: EvidenceScoreBundle, proposer_evidence: List[RetrievedPassage], refuter_result: RefuterResult = None) -> JudgeVerdict:
         prop_text = "\n".join([f"[{p.doc_id}] {p.text}" for p in proposer_evidence])
@@ -59,6 +99,9 @@ class JudgeAgent:
         
         result_json = None
         
+        # Ensure we only save the relevant supporting evidence
+        claim_supporting_evidence = [p for p in proposer_evidence if p.doc_id in claim.supporting_doc_ids]
+        
         for attempt in range(max_retries + 1):
             try:
                 response = self.llm.invoke(messages)
@@ -79,12 +122,13 @@ class JudgeAgent:
                     messages[-1].content += "\n\nYou must output ONLY valid JSON with keys: verdict, confidence, justification. No other text."
                     continue
                 else:
+                    verdict, final_conf, justification = self._heuristic_fallback_verdict(claim, score_bundle, refuter_result)
                     return JudgeVerdict(
                         claim_id=claim.claim_id,
-                        verdict="UNVERIFIABLE",
-                        final_confidence=0.0,
-                        justification="Judge output could not be parsed",
-                        supporting_evidence=proposer_evidence,
+                        verdict=verdict,
+                        final_confidence=final_conf,
+                        justification=f"Judge output could not be parsed; {justification}",
+                        supporting_evidence=claim_supporting_evidence,
                         counter_evidence=refuter_result.counter_passages if refuter_result else []
                     )
             except Exception as e:
@@ -93,22 +137,24 @@ class JudgeAgent:
                     wait_time = backoff[attempt] if attempt < len(backoff) else backoff[-1]
                     time.sleep(wait_time)
                     continue
+                verdict, final_conf, justification = self._heuristic_fallback_verdict(claim, score_bundle, refuter_result)
                 return JudgeVerdict(
                     claim_id=claim.claim_id,
-                    verdict="UNVERIFIABLE",
-                    final_confidence=0.0,
-                    justification=f"API error: {str(e)[:100]}",
-                    supporting_evidence=proposer_evidence,
+                    verdict=verdict,
+                    final_confidence=final_conf,
+                    justification=f"API error fallback ({str(e)[:100]}): {justification}",
+                    supporting_evidence=claim_supporting_evidence,
                     counter_evidence=refuter_result.counter_passages if refuter_result else []
                 )
                 
         if not result_json:
+            verdict, final_conf, justification = self._heuristic_fallback_verdict(claim, score_bundle, refuter_result)
             return JudgeVerdict(
                 claim_id=claim.claim_id,
-                verdict="UNVERIFIABLE",
-                final_confidence=0.0,
-                justification="Failed to get valid result",
-                supporting_evidence=proposer_evidence,
+                verdict=verdict,
+                final_confidence=final_conf,
+                justification=f"Failed to get valid LLM result; {justification}",
+                supporting_evidence=claim_supporting_evidence,
                 counter_evidence=refuter_result.counter_passages if refuter_result else []
             )
             
@@ -120,7 +166,7 @@ class JudgeAgent:
             verdict=result_json.get("verdict", "UNVERIFIABLE"),
             final_confidence=final_conf,
             justification=result_json.get("justification", ""),
-            supporting_evidence=proposer_evidence,
+            supporting_evidence=claim_supporting_evidence,
             counter_evidence=refuter_result.counter_passages if refuter_result else []
         )
         
