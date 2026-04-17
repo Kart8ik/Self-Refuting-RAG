@@ -56,6 +56,10 @@ out2.txt
 *.swo
 Thumbs.db
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
 SAD_SR_RAG_v1.1.md
 SRS_SR_RAG_v1.1.md
 current_status.md

@@ -18,8 +18,11 @@ class ConfigNode:
                 res[key] = value
         return res
 
-def load_config(config_path: str = "config.yaml") -> ConfigNode:
+def load_config(config_path: str = None) -> ConfigNode:
     """Load configuration from a YAML file."""
+    if config_path is None:
+        config_path = str(Path(__file__).parent / "config.yaml")
+    
     path = Path(config_path)
     if not path.exists():
         raise FileNotFoundError(f"Config file not found at {config_path}")

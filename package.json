@@ -1,0 +1,36 @@
+{
+  "name": "self-refuting-rag",
+  "version": "1.0.0",
+  "description": "**SR-RAG** is a multi-agent question answering system designed to improve factual accuracy and transparency through claim-level adversarial verification.",
+  "homepage": "https://github.com/Kart8ik/Self-Refuting-RAG#readme",
+  "bugs": {
+    "url": "https://github.com/Kart8ik/Self-Refuting-RAG/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kart8ik/Self-Refuting-RAG.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "start": "npm run stop:ports && concurrently --kill-others-on-fail \"npm run backend:dev\" \"npm run frontend:dev\"",
+    "start:logs": "npm run stop:ports && mkdir -p logs/terminal && concurrently --kill-others-on-fail \"npm run backend:dev:log\" \"npm run frontend:dev:log\"",
+    "stop:ports": "bash -lc 'for p in 8000 5173; do pid=$(lsof -ti tcp:$p); if [ -n \"$pid\" ]; then echo Stopping process on port $p: $pid; kill -9 $pid; fi; done'",
+    "backend:dev": "bash -lc 'PY=${PYTHON_BIN:-/Users/adma/Documents/Sem6/GenAi/handson/.venv/bin/python}; OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false FAISS_THREADS=1 SR_RAG_FAISS_INDEX=flat KMP_DUPLICATE_LIB_OK=TRUE \"$PY\" -m uvicorn chat_api:app --host 0.0.0.0 --port 8000'",
+    "backend:dev:reload": "bash -lc 'PY=${PYTHON_BIN:-/Users/adma/Documents/Sem6/GenAi/handson/.venv/bin/python}; OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false FAISS_THREADS=1 SR_RAG_FAISS_INDEX=flat KMP_DUPLICATE_LIB_OK=TRUE \"$PY\" -m uvicorn chat_api:app --host 0.0.0.0 --port 8000 --reload'",
+    "backend:dev:log": "bash -lc 'set -o pipefail; PY=${PYTHON_BIN:-/Users/adma/Documents/Sem6/GenAi/handson/.venv/bin/python}; OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 TOKENIZERS_PARALLELISM=false FAISS_THREADS=1 SR_RAG_FAISS_INDEX=flat KMP_DUPLICATE_LIB_OK=TRUE \"$PY\" -m uvicorn chat_api:app --host 0.0.0.0 --port 8000 2>&1 | tee logs/terminal/backend.log'",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:dev:log": "bash -lc 'set -o pipefail; npm --prefix frontend run dev 2>&1 | tee logs/terminal/frontend.log'",
+    "frontend:build": "npm --prefix frontend run build",
+    "logs:tail": "tail -f logs/terminal/backend.log logs/terminal/frontend.log",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

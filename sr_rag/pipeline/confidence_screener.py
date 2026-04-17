@@ -34,8 +34,12 @@ class ConfidenceScreener:
                 high_conf_claims.append(c)
                 
         # Spot check HIGH_CONF claims
+        import hashlib
         for c in high_conf_claims:
-            if self.rng.random() < self.spot_check_rate:
+            # Deterministic but pseudo-random per claim using hash
+            claim_hash = int(hashlib.md5(c.claim_id.encode()).hexdigest()[:8], 16)
+            c_rng = random.Random(self.seed + claim_hash)
+            if c_rng.random() < self.spot_check_rate:
                 c.spot_check = True
                 refuter_queue.append(c)
             else:

@@ -44,6 +44,7 @@ class RefuterAgent:
             "model": getattr(self.config.llm, "model", "llama-3.3-70b-versatile"),
             "messages": [
                 {"role": "system", "content": system_content},
+                {"role": "user", "content": "Analyze the claim against the retrieved counter-evidence and output a valid JSON verdict."}
             ],
             "temperature": getattr(self.config.llm, "temperature", 0.1),
             "max_tokens": getattr(self.config.llm, "max_tokens", 2048),
@@ -77,7 +78,7 @@ class RefuterAgent:
                         raise
                     except json.JSONDecodeError:
                         if attempt == 0:
-                            payload["messages"][0]["content"] += "\n\nCRITICAL: Output valid JSON only."
+                            payload["messages"][-1]["content"] += "\n\nCRITICAL: Output valid JSON only."
                             continue
                         raise
                     except Exception as e:

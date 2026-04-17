@@ -1,3 +1,4 @@
+from itertools import zip_longest
 from typing import List
 from sr_rag.models import Claim, JudgeVerdict, SystemOutput
 
@@ -24,7 +25,15 @@ class OutputSynthesiser:
         has_refuted = False
         has_conflicting = False
         
-        for c, v in zip(claims, verdicts):
+        for c, v in zip_longest(claims, verdicts):
+            if c is None:
+                continue
+
+            if v is None:
+                unverifiable_count += 1
+                nl_parts.append(f"{c.claim_text} [could not be verified from available sources]")
+                continue
+
             if v.verdict == "SUPPORTED":
                 supported_count += 1
                 nl_parts.append(c.claim_text)
@@ -39,7 +48,9 @@ class OutputSynthesiser:
                 refuted_count += 1
                 has_refuted = True
                 
-            if v.verdict in ["CONFLICTING", "REFUTED"]:
+            is_low_conf = v.final_confidence < 0.85
+
+            if v.verdict in ["CONFLICTING", "REFUTED"] or is_low_conf:
                 prop_ev = v.supporting_evidence[0].text if v.supporting_evidence else ""
                 count_ev = v.counter_evidence[0].text if v.counter_evidence else ""
                 
@@ -56,7 +67,7 @@ class OutputSynthesiser:
             nl_answer += "\n\nNote: one or more claims could not be verified and have been omitted."
             
         metadata = {
-            "total_claims": len(verdicts),
+            "total_claims": len(claims),
             "supported": supported_count,
             "refuted": refuted_count,
             "conflicting": conflicting_count,
@@ -69,6 +80,6 @@ class OutputSynthesiser:
         return SystemOutput(
             natural_language_answer=nl_answer.strip(),
             overall_confidence=overall_conf,
-            claim_table=claim_table if (has_conflicting or has_refuted) else None,
+            claim_table=claim_table if claim_table else None,
             metadata=metadata
         )
