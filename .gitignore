@@ -55,9 +55,10 @@ out2.txt
 *.swp
 *.swo
 Thumbs.db
-
+node_modules/
+srenv/
 # Frontend
-frontend/node_modules/
+frontend/
 frontend/dist/
 
 SAD_SR_RAG_v1.1.md
