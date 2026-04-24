@@ -38,9 +38,9 @@ flowchart TD
 
 ## Output Screenshots
 
-Main Chat Window
+![Main Chat Window](image1.png)
 
-Claim Breakdown Window
+![Claim Breakdown Window](image2.png)
 
 ## Setup & Installation
 
