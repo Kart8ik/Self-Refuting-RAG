@@ -5,6 +5,7 @@
 Unlike traditional whole-answer debate mechanisms, SR-RAG breaks down answers into atomic claims and selectively routes low-confidence claims to an adversarial Refuter agent constrained entirely to documentary evidence (retrieved context). A Judge agent resolves any emerging conflicts.
 
 ## Key Architectural Principles
+
 1. **Adversarial Asymmetry:** The Refuter Agent is constrained to using retrieved documents only.
 2. **Claim-Level Granularity:** Every verification, score, and verdict targets specific, individual facts.
 3. **Selective Adversarial Targeting:** Dual-signal screening (LLM confidence + FAISS cosine similarity) routes low-confidence claims to the Refuter, aggressively reducing unnecessary API calls.
@@ -35,6 +36,12 @@ flowchart TD
     K -.-> M[(Logs to run_log.jsonl)]
 ```
 
+## Output Screenshots
+
+![Main Chat Window](image1.png)
+
+![Claim Breakdown Window](image2.png)
+
 ## Setup & Installation
 
 > **Requirements:** Node.js 18+ and Python 3.9+ must be on your PATH.
@@ -61,20 +68,22 @@ npm start
 ```
 
 This kills any stale processes on ports 8000 / 5173, then starts the backend and frontend together.  
-Open **http://localhost:5173** in your browser.
+Open **[http://localhost:5173](http://localhost:5173)** in your browser.
 
 ### Individual commands
 
-| Command | What it does |
-|---|---|
-| `npm run setup` | First-time setup (venv + pip + frontend npm install) |
-| `npm start` | Start backend + frontend together |
-| `npm run start:logs` | Same, but backend output also written to `logs/terminal/backend.log` |
-| `npm run stop:ports` | Kill any process on ports 8000 or 5173 |
-| `npm run backend:dev` | Start backend only |
-| `npm run backend:dev:reload` | Start backend with `--reload` (hot-reload on code changes) |
-| `npm run frontend:dev` | Start frontend only |
-| `npm run frontend:build` | Build frontend for production |
+
+| Command                      | What it does                                                         |
+| ---------------------------- | -------------------------------------------------------------------- |
+| `npm run setup`              | First-time setup (venv + pip + frontend npm install)                 |
+| `npm start`                  | Start backend + frontend together                                    |
+| `npm run start:logs`         | Same, but backend output also written to `logs/terminal/backend.log` |
+| `npm run stop:ports`         | Kill any process on ports 8000 or 5173                               |
+| `npm run backend:dev`        | Start backend only                                                   |
+| `npm run backend:dev:reload` | Start backend with `--reload` (hot-reload on code changes)           |
+| `npm run frontend:dev`       | Start frontend only                                                  |
+| `npm run frontend:build`     | Build frontend for production                                        |
+
 
 ### Python environment override
 
@@ -96,6 +105,7 @@ PYTHON_BIN=/path/to/python npm run backend:dev
 - Thread counts for OpenMP / BLAS / MKL are all pinned to 1 by the launcher to prevent native library conflicts on all platforms.
 
 The UI shows:
+
 - chat response
 - route used (`SKIP`/`LITE`/`FULL`)
 - refuter queue size (how many claims entered loop)
@@ -113,6 +123,7 @@ Use the upload control in the chat UI to replace the active corpus with a new `.
 The default corpus is a small built-in sample. To run with your own dataset, activate the venv and set environment variables before running the tests.
 
 **Windows (PowerShell):**
+
 ```powershell
 .\srenv\Scripts\Activate.ps1
 $env:E2E_DATA_FILE = "C:\absolute\path\to\your_dataset.jsonl"
@@ -122,6 +133,7 @@ python tests/test_e2e.py
 ```
 
 **macOS / Linux:**
+
 ```bash
 source srenv/bin/activate
 E2E_DATA_FILE="/absolute/path/to/your_dataset.jsonl" \
@@ -135,6 +147,7 @@ Supported local formats: `.txt`, `.csv`, `.json`, `.jsonl`, `.parquet`
 You can also use a Hugging Face dataset directly:
 
 **Windows (PowerShell):**
+
 ```powershell
 .\srenv\Scripts\Activate.ps1
 $env:E2E_DATASET_NAME = "truthful_qa"
@@ -144,12 +157,14 @@ python tests/test_e2e.py
 ```
 
 **macOS / Linux:**
+
 ```bash
 source srenv/bin/activate
 E2E_DATASET_NAME="truthful_qa" E2E_DATASET_SPLIT="validation" E2E_TEXT_FIELDS="question" python tests/test_e2e.py
 ```
 
 To use all three FaithEval datasets together (Windows PowerShell):
+
 ```powershell
 .\srenv\Scripts\Activate.ps1
 $env:E2E_DATASET_NAMES = "Salesforce/FaithEval-inconsistent-v1.0,Salesforce/FaithEval-counterfactual-v1.0,Salesforce/FaithEval-unanswerable-v1.0"
@@ -160,6 +175,7 @@ python tests/test_e2e.py
 ```
 
 ## Project Structure
+
 - `agents/`: Contains the LLM interaction agents (`classifier.py`, `proposer.py`, `refuter.py`, `judge.py`).
 - `pipeline/`: Pure Python control and validation processes (Decomposer, Screener, Scorer, Synthesiser, Logger).
 - `retrieval/`: Wrappers for `faiss-cpu` and `sentence-transformers/all-MiniLM-L6-v2`.
